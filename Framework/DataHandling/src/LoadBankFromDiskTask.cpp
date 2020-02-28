@@ -350,7 +350,9 @@ void LoadBankFromDiskTask::run() {
   std::vector<uint64_t> event_index;
 
   // Open the file
-  ::NeXus::File file(m_loader.alg->m_filename);
+  ::NeXus::File &file = *m_loader.alg->m_file;
+  // top level file information
+  file.openPath("/");
   try {
     // Navigate into the file
     file.openGroup(m_loader.alg->m_top_entry_name, "NXentry");
@@ -424,7 +426,6 @@ void LoadBankFromDiskTask::run() {
 
   // Close up the file even if errors occured.
   file.closeGroup();
-  file.close();
 
   // Abort if anything failed
   if (m_loadError) {

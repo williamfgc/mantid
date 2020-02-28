@@ -106,8 +106,14 @@ public:
       std::unique_ptr<const Kernel::TimeSeriesProperty<int>> &periodLog,
       const int &nPeriods, const std::string &nexusfilename);
 
+  // this function is static as it's called by other classes without an instance
+  // of this class
   template <typename T>
-  static void loadEntryMetadata(const std::string &nexusfilename, T WS,
+  static void loadEntryMetadata(const std::string &filename, T WS,
+                                const std::string &entry_name);
+
+  template <typename T>
+  static void loadEntryMetadata(::NeXus::File &file, T WS,
                                 const std::string &entry_name);
 
   /// Load instrument from Nexus file if possible, else from IDF spacified by
@@ -594,12 +600,20 @@ bool LoadEventNexus::runLoadInstrument(const std::string &nexusfilename,
 }
 
 //-----------------------------------------------------------------------------
+template <typename T>
+void LoadEventNexus::loadEntryMetadata(const std::string &filename, T WS,
+                                       const std::string &entry_name) {
+  ::NeXus::File file(filename);
+  loadEntryMetadata(file, WS, entry_name);
+  file.close();
+}
+
 /** Load the run number and other meta data from the given bank */
 template <typename T>
-void LoadEventNexus::loadEntryMetadata(const std::string &nexusfilename, T WS,
+void LoadEventNexus::loadEntryMetadata(::NeXus::File &file, T WS,
                                        const std::string &entry_name) {
-  // Open the file
-  ::NeXus::File file(nexusfilename);
+
+  file.openPath("/");
   file.openGroup(entry_name, "NXentry");
 
   // only generating the entriesMap once
@@ -715,9 +729,6 @@ void LoadEventNexus::loadEntryMetadata(const std::string &nexusfilename, T WS,
     }
     file.closeData();
   }
-
-  // close the file
-  file.close();
 }
 
 //-----------------------------------------------------------------------------
