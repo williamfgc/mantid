@@ -68,15 +68,18 @@ DefaultEventLoader::DefaultEventLoader(LoadEventNexus *alg,
     pixelID_to_wi_vector =
         m_ws.getDetectorIDToWorkspaceIndexVector(pixelID_to_wi_offset, true);
 
+  SetEventIDMax();
   // Cache a map for speed.
   if (!haveWeights) {
-    makeMapToEventLists(eventVectors);
+    // makeMapToEventLists(eventVectors);
+    makeMapToEventLists(m_events);
   } else {
     // Convert to weighted events
     for (size_t i = 0; i < m_ws.getNumberHistograms(); i++) {
       m_ws.getSpectrum(i).switchTo(API::WEIGHTED);
     }
-    makeMapToEventLists(weightedEventVectors);
+    // makeMapToEventLists(weightedEventVectors);
+    makeMapToEventLists(m_weightedEvents);
   }
 
   // split banks up if the number of cores is more than twice the number of
@@ -151,6 +154,32 @@ DefaultEventLoader::setupChunking(std::vector<std::string> &bankNames,
     }
   }
   return {bank0, bankn};
+}
+
+void DefaultEventLoader::SetEventIDMax() {
+
+  if (event_id_is_spec) {
+    // Find max spectrum no
+    auto *ax1 = m_ws.getAxis(1);
+    specnum_t maxSpecNo =
+        -std::numeric_limits<specnum_t>::max(); // So that any number will be
+                                                // greater than this
+    for (size_t i = 0; i < ax1->length(); i++) {
+      specnum_t spec = ax1->spectraNo(i);
+      if (spec > maxSpecNo)
+        maxSpecNo = spec;
+    }
+
+    // These are used by the bank loader to figure out where to put the events
+    // The index of eventVectors is a spectrum number so it is simply resized to
+    // the maximum
+    // possible spectrum number
+    eventid_max = maxSpecNo;
+  } else {
+    // To avoid going out of range in the vector, this is the MAX INDEX that can
+    // go into it
+    eventid_max = static_cast<int32_t>(pixelID_to_wi_vector.size());
+  }
 }
 
 } // namespace DataHandling

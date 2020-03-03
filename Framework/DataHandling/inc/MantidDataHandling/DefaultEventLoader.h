@@ -65,10 +65,19 @@ public:
   std::vector<std::vector<std::vector<Mantid::Types::Event::TofEvent> *>>
       eventVectors;
 
+  /// linearize look up
+  std::unordered_map<std::size_t, std::vector<Mantid::Types::Event::TofEvent> *>
+      m_events;
+
   /// Vector where index = event_id; value = ptr to std::vector<WeightedEvent>
   /// in the event list.
   std::vector<std::vector<std::vector<Mantid::DataObjects::WeightedEvent> *>>
       weightedEventVectors;
+
+  /// linearize look up
+  std::unordered_map<std::size_t,
+                     std::vector<Mantid::DataObjects::WeightedEvent> *>
+      m_weightedEvents;
 
   /// Vector where (index = pixel ID+pixelID_to_wi_offset), value = workspace
   /// index)
@@ -85,10 +94,51 @@ private:
   std::pair<size_t, size_t>
   setupChunking(std::vector<std::string> &bankNames,
                 std::vector<std::size_t> &bankNumEvents);
+
+  /// Sets event_max_id
+  void SetEventIDMax();
+
   /// Map detector IDs to event lists.
   template <class T>
   void makeMapToEventLists(std::vector<std::vector<T>> &vectors);
+
+  template <class T>
+  void makeMapToEventLists(std::unordered_map<std::size_t, T> &umap);
 };
+
+template <class T>
+void DefaultEventLoader::makeMapToEventLists(
+    std::unordered_map<std::size_t, T> &umap) {
+
+  // reserve maximum possible
+  umap.reserve(m_ws.nPeriods() * (eventid_max + 1));
+
+  if (event_id_is_spec) {
+
+    for (size_t period = 0; period < m_ws.nPeriods(); ++period) {
+      for (size_t i = 0; i < m_ws.getNumberHistograms(); ++i) {
+        const auto &spec = m_ws.getSpectrum(i);
+        const size_t umapIndex =
+            period * (eventid_max + 1) + spec.getSpectrumNo();
+        getEventsFrom(m_ws.getSpectrum(i, period), umap[umapIndex]);
+      }
+    }
+
+  } else {
+
+    for (size_t j = 0; j < pixelID_to_wi_vector.size(); j++) {
+      size_t wi = pixelID_to_wi_vector[j];
+      // Save a POINTER to the vector
+      if (wi < m_ws.getNumberHistograms()) {
+        for (size_t period = 0; period < m_ws.nPeriods(); ++period) {
+          const size_t umapIndex =
+              period * (eventid_max + 1) + (j - pixelID_to_wi_offset);
+          getEventsFrom(m_ws.getSpectrum(wi, period), umap[umapIndex]);
+        }
+      }
+    }
+  }
+}
 
 /** Generate a look-up table where the index = the pixel ID of an event
  * and the value = a pointer to the EventList in the workspace
@@ -98,25 +148,11 @@ template <class T>
 void DefaultEventLoader::makeMapToEventLists(
     std::vector<std::vector<T>> &vectors) {
   vectors.resize(m_ws.nPeriods());
-  if (event_id_is_spec) {
-    // Find max spectrum no
-    auto *ax1 = m_ws.getAxis(1);
-    specnum_t maxSpecNo =
-        -std::numeric_limits<specnum_t>::max(); // So that any number will be
-                                                // greater than this
-    for (size_t i = 0; i < ax1->length(); i++) {
-      specnum_t spec = ax1->spectraNo(i);
-      if (spec > maxSpecNo)
-        maxSpecNo = spec;
-    }
 
-    // These are used by the bank loader to figure out where to put the events
-    // The index of eventVectors is a spectrum number so it is simply resized to
-    // the maximum
-    // possible spectrum number
-    eventid_max = maxSpecNo;
+  if (event_id_is_spec) {
+
     for (size_t i = 0; i < vectors.size(); ++i) {
-      vectors[i].resize(maxSpecNo + 1, nullptr);
+      vectors[i].resize(eventid_max + 1, nullptr);
     }
     for (size_t period = 0; period < m_ws.nPeriods(); ++period) {
       for (size_t i = 0; i < m_ws.getNumberHistograms(); ++i) {
@@ -125,11 +161,8 @@ void DefaultEventLoader::makeMapToEventLists(
                       vectors[period][spec.getSpectrumNo()]);
       }
     }
-  } else {
-    // To avoid going out of range in the vector, this is the MAX INDEX that can
-    // go into it
-    eventid_max = static_cast<int32_t>(pixelID_to_wi_vector.size());
 
+  } else {
     // Make an array where index = pixel ID
     // Set the value to NULL by default
     for (size_t i = 0; i < vectors.size(); ++i) {

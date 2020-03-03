@@ -76,31 +76,30 @@ void ProcessBankData::run() { // override {
   // ---- Pre-counting events per pixel ID ----
   auto &outputWS = m_loader.m_ws;
   auto *alg = m_loader.alg;
-  if (m_loader.precount) {
-
-    std::vector<size_t> counts(m_max_id - m_min_id + 1, 0);
-    for (size_t i = 0; i < numEvents; i++) {
-      const auto thisId = detid_t(event_id[i]);
-      if (thisId >= m_min_id && thisId <= m_max_id)
-        counts[thisId - m_min_id]++;
-    }
-
-    // Now we pre-allocate (reserve) the vectors of events in each pixel
-    // counted
-    const size_t numEventLists = outputWS.getNumberHistograms();
-    for (detid_t pixID = m_min_id; pixID <= m_max_id; pixID++) {
-      if (counts[pixID - m_min_id] > 0) {
-        size_t wi = getWorkspaceIndexFromPixelID(pixID);
-        // Find the the workspace index corresponding to that pixel ID
-        // Allocate it
-        if (wi < numEventLists) {
-          outputWS.reserveEventListAt(wi, counts[pixID - m_min_id]);
-        }
-        if (alg->getCancel())
-          break; // User cancellation
-      }
-    }
-  }
+  // if (m_loader.precount) {
+  //    std::vector<size_t> counts(m_max_id - m_min_id + 1, 0);
+  //    for (size_t i = 0; i < numEvents; i++) {
+  //      const auto thisId = detid_t(event_id[i]);
+  //      if (thisId >= m_min_id && thisId <= m_max_id)
+  //        counts[thisId - m_min_id]++;
+  //    }
+  //
+  //    // Now we pre-allocate (reserve) the vectors of events in each pixel
+  //    // counted
+  //    const size_t numEventLists = outputWS.getNumberHistograms();
+  //    for (detid_t pixID = m_min_id; pixID <= m_max_id; pixID++) {
+  //      if (counts[pixID - m_min_id] > 0) {
+  //        size_t wi = getWorkspaceIndexFromPixelID(pixID);
+  //        // Find the the workspace index corresponding to that pixel ID
+  //        // Allocate it
+  //        if (wi < numEventLists) {
+  //          outputWS.reserveEventListAt(wi, counts[pixID - m_min_id]);
+  //        }
+  //        if (alg->getCancel())
+  //          break; // User cancellation
+  //      }
+  //    }
+  // }
 
   // Check for canceled algorithm
   if (alg->getCancel()) {
@@ -165,23 +164,31 @@ void ProcessBankData::run() { // override {
         if ((tof - TOF_MIN) * (tof - TOF_MAX) <= 0.) {
           // Handle simulated data if present
           if (have_weight) {
-            auto *eventVector =
-                m_loader.weightedEventVectors[periodIndex][detId];
-            // NULL eventVector indicates a bad spectrum lookup
-            if (eventVector) {
+
+            const size_t umapIndex =
+                periodIndex * (m_loader.eventid_max + 1) + detId;
+
+            auto itEventVector = m_loader.m_weightedEvents.find(umapIndex);
+            if (itEventVector != m_loader.m_weightedEvents.end()) {
+
               const auto weight = static_cast<double>(event_weight[eventIndex]);
               const double errorSq = weight * weight;
-              eventVector->emplace_back(tof, pulsetime, weight, errorSq);
+              itEventVector->second->emplace_back(tof, pulsetime, weight,
+                                                  errorSq);
             } else {
+              // Not found indicates a bad spectrum lookup
               ++my_discarded_events;
             }
           } else {
+
             // We have cached the vector of events for this detector ID
-            auto *eventVector = m_loader.eventVectors[periodIndex][detId];
-            // NULL eventVector indicates a bad spectrum lookup
-            if (eventVector) {
-              eventVector->emplace_back(tof, pulsetime);
+            const size_t umapIndex =
+                periodIndex * (m_loader.eventid_max + 1) + detId;
+            auto itEventVector = m_loader.m_events.find(umapIndex);
+            if (itEventVector != m_loader.m_events.end()) {
+              itEventVector->second->emplace_back(tof, pulsetime);
             } else {
+              // Not found indicates a bad spectrum lookup
               ++my_discarded_events;
             }
           }
