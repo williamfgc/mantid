@@ -10,6 +10,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -89,6 +90,8 @@ public:
   std::string pathOfType(const std::string &type) const;
   /// Query if a given type exists somewhere in the file
   bool classTypeExists(const std::string &classType) const;
+  /// set m_allEntries from a valid Nexus m_file, uses HDF5 API directly
+  void setAllEntries();
 
 private:
   /// Initialize object with filename
@@ -111,6 +114,11 @@ private:
 
   /// Open NeXus handle
   std::unique_ptr<::NeXus::File> m_file;
+
+  /// metadata entries
+  /// key: group_class
+  /// value: set with absolute entry names for the group_class key
+  std::map<std::string, std::set<std::string>> m_allEntries;
 };
 
 } // namespace Kernel
