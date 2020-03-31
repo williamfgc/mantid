@@ -27,6 +27,26 @@ DLLExport int getNexusEntryTypes(const std::string &fileName,
                                  std::vector<std::string> &entryName,
                                  std::vector<std::string> &definition);
 
+/**
+ * Map of all the entries in a NeXus file
+ * key: Dataset/Group type
+ * value: Dataset/Group absolute value
+ * @param file input
+ * @return map of all entries key: types, value: set of absolute paths
+ */
+DLLExport std::map<std::string, std::set<std::string>>
+getNexusAllEntries(const std::string &filename);
+
+/**
+ * Returns current relative path of a string
+ * e.g. /my/absolute/location -> location
+ * @param input absolute or relative location
+ * @param separator default = "/", hierarchy separator
+ * @return relative location
+ */
+DLLExport std::string RelativePath(const std::string &input,
+                                   const std::string separator = "/");
+
 /** @class NexusFileIO NexusFileIO.h NeXus/NexusFileIO.h
 
 Utility method for saving NeXus format of Mantid Workspace

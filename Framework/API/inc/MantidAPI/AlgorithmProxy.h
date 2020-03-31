@@ -162,6 +162,12 @@ public:
   Json::Value toJson() const override;
   //@}
 
+  void setAllEntries_ptr(const std::map<std::string, std::set<std::string>>
+                             &allEntries) noexcept override;
+
+  const std::map<std::string, std::set<std::string>> *getAllEntries_ptr() const
+      noexcept override;
+
 private:
   void createConcreteAlg(bool initOnly = false);
   void stopped();

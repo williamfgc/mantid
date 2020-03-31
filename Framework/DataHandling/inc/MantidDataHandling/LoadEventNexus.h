@@ -56,6 +56,9 @@ bool exists(::NeXus::File &file, const std::string &name);
 bool exists(const std::map<std::string, std::string> &entries,
             const std::string &name);
 
+bool exists(const std::map<std::string, std::set<std::string>> &allEntries,
+            const std::string &name);
+
 /** @class LoadEventNexus LoadEventNexus.h Nexus/LoadEventNexus.h
 
   Load Event Nexus files.
@@ -99,16 +102,28 @@ public:
   static boost::shared_ptr<BankPulseTimes> runLoadNexusLogs(
       const std::string &nexusfilename, T localWorkspace, Algorithm &alg,
       bool returnpulsetimes, int &nPeriods,
-      std::unique_ptr<const Kernel::TimeSeriesProperty<int>> &periodLog);
+      std::unique_ptr<const Kernel::TimeSeriesProperty<int>> &periodLog,
+      const std::map<std::string, std::set<std::string>> &allEntries);
 
   static void checkForCorruptedPeriods(
       std::unique_ptr<Kernel::TimeSeriesProperty<int>> tempPeriodLog,
       std::unique_ptr<const Kernel::TimeSeriesProperty<int>> &periodLog,
       const int &nPeriods, const std::string &nexusfilename);
 
+  // this function is static as it's called by other classes without an instance
+  // of this class
   template <typename T>
-  static void loadEntryMetadata(const std::string &nexusfilename, T WS,
+  static void loadEntryMetadata(const std::string &filename, T WS,
                                 const std::string &entry_name);
+
+  template <typename T>
+  static void loadEntryMetadata(::NeXus::File &file, T WS,
+                                const std::string &entry_name);
+
+  template <typename T>
+  static void loadEntryMetadata(
+      ::NeXus::File &file, T WS, const std::string &entry_name,
+      const std::map<std::string, std::set<std::string>> &allEntries);
 
   /// Load instrument from Nexus file if possible, else from IDF spacified by
   /// Nexus file
@@ -181,6 +196,11 @@ public:
   std::string m_top_entry_name;
   std::unique_ptr<::NeXus::File> m_file;
 
+  /// metadata entries
+  /// key: group_class
+  /// value: set with absolute entry names for the group_class key
+  std::map<std::string, std::set<std::string>> m_allEntries;
+
 protected:
   Parallel::ExecutionMode getParallelExecutionMode(
       const std::map<std::string, Parallel::StorageMode> &storageModes)
@@ -224,6 +244,9 @@ private:
 
   /// to open the nexus file with specific exception handling/message
   void safeOpenFile(const std::string &fname);
+
+  /// set m_allEntries from a valid Nexus m_file
+  void setAllEntries();
 
   /// Was the instrument loaded?
   bool m_instrument_loaded_correctly;
@@ -359,20 +382,31 @@ void makeTimeOfFlightDataFuzzy(::NeXus::File &file, T localWorkspace,
  * @param classType :: The type of the events: either detector or monitor
  */
 template <typename T>
-void adjustTimeOfFlightISISLegacy(::NeXus::File &file, T localWorkspace,
-                                  const std::string &entry_name,
-                                  const std::string &classType) {
+void adjustTimeOfFlightISISLegacy(
+    ::NeXus::File &file, T localWorkspace, const std::string &entry_name,
+    const std::string &classType,
+    const std::map<std::string, std::set<std::string>> &allEntries =
+        std::map<std::string, std::set<std::string>>()) {
   bool done = false;
   // Go to the root, and then top entry
   file.openPath("/");
   file.openGroup(entry_name, "NXentry");
 
-  using string_map_t = std::map<std::string, std::string>;
-  string_map_t entries = file.getEntries();
-
-  if (entries.find("detector_1_events") == entries.end()) { // not an ISIS file
+  const std::string detectorEvents = "/" + entry_name + "/detector_1_events";
+  bool isISISFile = false;
+  for (const auto &entryPair : allEntries) {
+    const std::set<std::string> &entries = entryPair.second;
+    if (entries.count(detectorEvents) == 1) {
+      isISISFile = true;
+      break;
+    }
+  }
+  if (!isISISFile) { // not an ISIS file
     return;
   }
+
+  using string_map_t = std::map<std::string, std::string>;
+  string_map_t entries = file.getEntries();
 
   // try if monitors have their own bins
   if (classType == "NXmonitor") {
@@ -477,8 +511,19 @@ bool LoadEventNexus::runLoadInstrument(const std::string &nexusfilename,
   std::string instrument;
   std::string instFilename;
 
+  const std::map<std::string, std::set<std::string>> *allEntries =
+      alg->getAllEntries_ptr();
+
+  bool isNexus = false;
+  if (allEntries == nullptr) {
+    std::cout << "Found nullptr ENTRIES from algorithm " << alg->name() << "\n";
+    isNexus = LoadGeometry::isNexus(nexusfilename);
+  } else {
+    isNexus = LoadGeometry::isNexus(nexusfilename, *allEntries);
+  }
+
   // Check if the geometry can be loaded directly from the Nexus file
-  if (LoadGeometry::isNexus(nexusfilename)) {
+  if (isNexus) {
     instFilename = nexusfilename;
   } else {
     // Get the instrument name
@@ -594,12 +639,18 @@ bool LoadEventNexus::runLoadInstrument(const std::string &nexusfilename,
 }
 
 //-----------------------------------------------------------------------------
-/** Load the run number and other meta data from the given bank */
 template <typename T>
-void LoadEventNexus::loadEntryMetadata(const std::string &nexusfilename, T WS,
+void LoadEventNexus::loadEntryMetadata(const std::string &filename, T WS,
                                        const std::string &entry_name) {
-  // Open the file
-  ::NeXus::File file(nexusfilename);
+  ::NeXus::File file(filename);
+  loadEntryMetadata(file, WS, entry_name);
+  file.close();
+}
+
+template <typename T>
+void LoadEventNexus::loadEntryMetadata(::NeXus::File &file, T WS,
+                                       const std::string &entry_name) {
+  file.openPath("/");
   file.openGroup(entry_name, "NXentry");
 
   // only generating the entriesMap once
@@ -699,6 +750,131 @@ void LoadEventNexus::loadEntryMetadata(const std::string &nexusfilename, T WS,
     if (duration.size() == 1) {
       // get the units
       // clang-format off
+	    std::vector< ::NeXus::AttrInfo> infos = file.getAttrInfos();
+	    std::string units;
+	    for (std::vector< ::NeXus::AttrInfo>::const_iterator it = infos.begin();
+	         it != infos.end(); ++it) {
+	      if (it->name == "units") {
+	        units = file.getStrAttr(*it);
+	        break;
+	      }
+	    }
+      // clang-format on
+
+      // set the property
+      WS->mutableRun().addProperty("duration", duration[0], units);
+    }
+    file.closeData();
+  }
+}
+
+/** Load the run number and other meta data from the given bank */
+template <typename T>
+void LoadEventNexus::loadEntryMetadata(
+    ::NeXus::File &file, T WS, const std::string &entry_name,
+    const std::map<std::string, std::set<std::string>> &allEntries) {
+
+  file.openPath("/");
+  file.openGroup(entry_name, "NXentry");
+
+  // only generating the entriesMap once
+  // const std::map<std::string, std::string> entriesNxentry =
+  // file.getEntries();
+
+  // get the title
+  if (exists(allEntries, "/" + entry_name + "/title")) {
+    file.openData("title");
+    if (file.getInfo().type == ::NeXus::CHAR) {
+      std::string title = file.getStrData();
+      if (!title.empty())
+        WS->setTitle(title);
+    }
+    file.closeData();
+  }
+
+  // get the notes
+  if (exists(allEntries, "/" + entry_name + "/notes")) {
+    file.openData("notes");
+    if (file.getInfo().type == ::NeXus::CHAR) {
+      std::string notes = file.getStrData();
+      if (!notes.empty())
+        WS->mutableRun().addProperty("file_notes", notes);
+    }
+    file.closeData();
+  }
+
+  // Get the run number
+  if (exists(allEntries, "/" + entry_name + "/run_number")) {
+    file.openData("run_number");
+    std::string run;
+    if (file.getInfo().type == ::NeXus::CHAR) {
+      run = file.getStrData();
+    } else if (file.isDataInt()) {
+      // inside ISIS the run_number type is int32
+      std::vector<int> value;
+      file.getData(value);
+      if (!value.empty())
+        run = std::to_string(value[0]);
+    }
+    if (!run.empty()) {
+      WS->mutableRun().addProperty("run_number", run);
+    }
+    file.closeData();
+  }
+
+  // get the experiment identifier
+  if (exists(allEntries, "/" + entry_name + "/experiment_identifier")) {
+    file.openData("experiment_identifier");
+    std::string expId;
+    if (file.getInfo().type == ::NeXus::CHAR) {
+      expId = file.getStrData();
+    }
+    if (!expId.empty()) {
+      WS->mutableRun().addProperty("experiment_identifier", expId);
+    }
+    file.closeData();
+  }
+
+  // get the sample name - nested try/catch to leave the handle in an
+  // appropriate state
+  if (exists(allEntries, "/" + entry_name + "/sample")) {
+    file.openGroup("sample", "NXsample");
+    try {
+      if (exists(allEntries, "/" + entry_name + "sample/name")) {
+        file.openData("name");
+        const auto info = file.getInfo();
+        std::string name;
+        if (info.type == ::NeXus::CHAR) {
+          if (info.dims.size() == 1) {
+            name = file.getStrData();
+          } else { // something special for 2-d array
+            const int64_t total_length = std::accumulate(
+                info.dims.begin(), info.dims.end(), static_cast<int64_t>(1),
+                std::multiplies<int64_t>());
+            boost::scoped_array<char> val_array(new char[total_length]);
+            file.getData(val_array.get());
+            name = std::string(val_array.get(), total_length);
+          }
+        }
+        file.closeData();
+        if (!name.empty()) {
+          WS->mutableSample().setName(name);
+        }
+      }
+    } catch (::NeXus::Exception &) {
+      // let it drop on floor if an exception occurs while reading sample
+    }
+    file.closeGroup();
+  }
+
+  // get the duration
+  if (exists(allEntries, "/" + entry_name + "/duration")) {
+    file.openData("duration");
+    std::vector<double> duration;
+    file.getDataCoerce(duration);
+    if (duration.size() == 1) {
+      // get the units
+      // clang-format off
     std::vector< ::NeXus::AttrInfo> infos = file.getAttrInfos();
     std::string units;
     for (std::vector< ::NeXus::AttrInfo>::const_iterator it = infos.begin();
@@ -715,9 +891,6 @@ void LoadEventNexus::loadEntryMetadata(const std::string &nexusfilename, T WS,
     }
     file.closeData();
   }
-
-  // close the file
-  file.close();
 }
 
 //-----------------------------------------------------------------------------

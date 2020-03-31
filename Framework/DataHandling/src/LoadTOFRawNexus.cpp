@@ -16,6 +16,7 @@
 #include "MantidKernel/BoundedValidator.h"
 #include "MantidKernel/Strings.h"
 #include "MantidKernel/cow_ptr.h"
+#include "MantidNexus/NexusFileIO.h"
 #include <nexus/NeXusFile.hpp>
 
 #include <boost/algorithm/string/detail/classification.hpp>
@@ -482,6 +483,8 @@ void LoadTOFRawNexus::exec() {
   m_spec_min = getProperty("SpectrumMin");
   m_spec_max = getProperty("SpectrumMax");
 
+  const std::map<std::string, std::set<std::string>> allEntries =
+      Mantid::NeXus::getNexusAllEntries(filename);
   // Find the entry name we want.
   std::string entry_name = LoadTOFRawNexus::getEntryName(filename);
 
@@ -508,7 +511,7 @@ void LoadTOFRawNexus::exec() {
   auto periodLog =
       std::make_unique<const TimeSeriesProperty<int>>("period_log"); // Unused
   LoadEventNexus::runLoadNexusLogs<MatrixWorkspace_sptr>(
-      filename, WS, *this, false, nPeriods, periodLog);
+      filename, WS, *this, false, nPeriods, periodLog, allEntries);
 
   // Load the instrument
   prog->report("Loading instrument");
@@ -520,7 +523,9 @@ void LoadTOFRawNexus::exec() {
   prog->report("Loading metadata");
   g_log.debug() << "Loading metadata\n";
   try {
-    LoadEventNexus::loadEntryMetadata(filename, WS, entry_name);
+    ::NeXus::File file(filename);
+    LoadEventNexus::loadEntryMetadata(file, WS, entry_name, allEntries);
+    file.close();
   } catch (std::exception &e) {
     g_log.warning() << "Error while loading meta data: " << e.what() << '\n';
   }

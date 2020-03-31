@@ -114,7 +114,8 @@ private:
   void loadSampleData(DataObjects::Workspace2D_sptr &,
                       Mantid::NeXus::NXEntry &entry);
   /// Load log data from the nexus file
-  void loadLogs(DataObjects::Workspace2D_sptr &ws);
+  void loadLogs(DataObjects::Workspace2D_sptr &ws,
+                const std::map<std::string, std::set<std::string>> &allEntries);
   // Load a given period into the workspace
   void loadPeriodData(int64_t period, Mantid::NeXus::NXEntry &entry,
                       DataObjects::Workspace2D_sptr &local_workspace,

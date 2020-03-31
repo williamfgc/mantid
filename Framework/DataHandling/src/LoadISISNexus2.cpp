@@ -26,6 +26,7 @@
 #include "MantidKernel/LogFilter.h"
 #include "MantidKernel/TimeSeriesProperty.h"
 #include "MantidKernel/UnitFactory.h"
+#include "MantidNexus/NexusFileIO.h"
 
 // clang-format off
 #include <nexus/NeXusFile.hpp>
@@ -165,6 +166,9 @@ void LoadISISNexus2::exec() {
 
   //**********************************************************************
   m_filename = getPropertyValue("Filename");
+  // needs to be here to avoid conflict with hdf5 file mutex lock
+  const std::map<std::string, std::set<std::string>> allEntries =
+      Mantid::NeXus::getNexusAllEntries(m_filename);
   // Create the root Nexus class
   NXRoot root(m_filename);
 
@@ -289,7 +293,7 @@ void LoadISISNexus2::exec() {
   // ticket #8697
   loadSampleData(local_workspace, entry);
   m_progress->report("Loading logs");
-  loadLogs(local_workspace);
+  loadLogs(local_workspace, allEntries);
 
   // Load first period outside loop
   m_progress->report("Loading data");
@@ -1137,10 +1141,17 @@ void LoadISISNexus2::loadSampleData(
  *   within /raw_data_1 group.
  *   @param ws :: The workspace to load the logs to.
  */
-void LoadISISNexus2::loadLogs(DataObjects::Workspace2D_sptr &ws) {
+void LoadISISNexus2::loadLogs(
+    DataObjects::Workspace2D_sptr &ws,
+    const std::map<std::string, std::set<std::string>> &allEntries) {
   IAlgorithm_sptr alg = createChildAlgorithm("LoadNexusLogs", 0.0, 0.5);
   alg->setPropertyValue("Filename", this->getProperty("Filename"));
   alg->setProperty<MatrixWorkspace_sptr>("Workspace", ws);
+
+  if (!allEntries.empty()) {
+    alg->setAllEntries_ptr(allEntries);
+  }
+
   try {
     alg->executeAsChildAlg();
   } catch (std::runtime_error &) {

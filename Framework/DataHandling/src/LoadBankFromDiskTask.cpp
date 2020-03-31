@@ -217,10 +217,10 @@ LoadBankFromDiskTask::loadEventId(::NeXus::File &file) {
     file.closeData();
 
     // determine the range of pixel ids
-    m_min_id =
-        *(std::min_element(event_id.get(), event_id.get() + m_loadSize[0]));
-    m_max_id =
-        *(std::max_element(event_id.get(), event_id.get() + m_loadSize[0]));
+    auto minmaxItPair =
+        std::minmax_element(event_id.get(), event_id.get() + m_loadSize[0]);
+    m_min_id = *minmaxItPair.first;
+    m_max_id = *minmaxItPair.second;
 
     if (m_min_id > static_cast<uint32_t>(m_loader.eventid_max)) {
       // All the detector IDs in the bank are higher than the highest 'known'

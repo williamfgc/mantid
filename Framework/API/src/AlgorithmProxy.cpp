@@ -330,6 +330,15 @@ Json::Value AlgorithmProxy::toJson() const {
   return m_alg->toJson();
 }
 
+void AlgorithmProxy::setAllEntries_ptr(
+    const std::map<std::string, std::set<std::string>>
+        & /*allEntries*/) noexcept {}
+
+const std::map<std::string, std::set<std::string>> *
+AlgorithmProxy::getAllEntries_ptr() const noexcept {
+  return nullptr;
+}
+
 /// Function to return all of the categories that contain this algorithm
 const std::vector<std::string> AlgorithmProxy::categories() const {
   Mantid::Kernel::StringTokenizer tokenizer(

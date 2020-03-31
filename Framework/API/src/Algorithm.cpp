@@ -892,6 +892,16 @@ void Algorithm::setupAsChildAlgorithm(const Algorithm_sptr &alg,
   }
 }
 
+void Algorithm::setAllEntries_ptr(
+    const std::map<std::string, std::set<std::string>> &allEntries) noexcept {
+  m_allEntries = &allEntries;
+}
+
+const std::map<std::string, std::set<std::string>> *
+Algorithm::getAllEntries_ptr() const noexcept {
+  return m_allEntries;
+}
+
 //=============================================================================================
 //================================== Algorithm History
 //========================================

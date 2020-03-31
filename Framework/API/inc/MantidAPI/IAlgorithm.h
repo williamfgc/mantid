@@ -180,6 +180,14 @@ public:
   virtual std::string toString() const = 0;
   /// Serialize an algorithm as Json
   virtual ::Json::Value toJson() const = 0;
+  /// Share the metadata entries among derived classes through a non-owning
+  /// pointer
+  virtual void
+  setAllEntries_ptr(const std::map<std::string, std::set<std::string>>
+                        &allEntries) noexcept = 0;
+  /// getter to setAllEntries_ptr
+  virtual const std::map<std::string, std::set<std::string>> *
+  getAllEntries_ptr() const noexcept = 0;
 
 private:
   using Kernel::IPropertyManager::asJson;

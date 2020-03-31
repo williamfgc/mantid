@@ -60,18 +60,22 @@ private:
   /// Overwrites Algorithm method
   void exec() override;
   /// Load log data from a group
-  void loadLogs(::NeXus::File &file, const std::string &entry_name,
-                const std::string &entry_class,
-                const boost::shared_ptr<API::MatrixWorkspace> &workspace) const;
+  void loadLogs(
+      ::NeXus::File &file, const std::string &absolute_entry_name,
+      const std::string &entry_class,
+      const boost::shared_ptr<API::MatrixWorkspace> &workspace,
+      const std::map<std::string, std::set<std::string>> &allEntries) const;
   /// Load an NXlog entry
-  void
-  loadNXLog(::NeXus::File &file, const std::string &entry_name,
-            const std::string &entry_class,
-            const boost::shared_ptr<API::MatrixWorkspace> &workspace) const;
+  void loadNXLog(
+      ::NeXus::File &file, const std::string &absolute_entry_name,
+      const std::string &entry_class,
+      const boost::shared_ptr<API::MatrixWorkspace> &workspace,
+      const std::map<std::string, std::set<std::string>> &allEntries) const;
   /// Load an IXseblock entry
-  void
-  loadSELog(::NeXus::File &file, const std::string &entry_name,
-            const boost::shared_ptr<API::MatrixWorkspace> &workspace) const;
+  void loadSELog(
+      ::NeXus::File &file, const std::string &absolute_entry_name,
+      const boost::shared_ptr<API::MatrixWorkspace> &workspace,
+      const std::map<std::string, std::set<std::string>> &allEntries) const;
   void loadVetoPulses(
       ::NeXus::File &file,
       const boost::shared_ptr<API::MatrixWorkspace> &workspace) const;

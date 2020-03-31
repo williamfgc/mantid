@@ -27,10 +27,13 @@
 #include "MantidKernel/Timer.h"
 #include "MantidKernel/UnitFactory.h"
 #include "MantidKernel/VisibleWhenProperty.h"
+#include "MantidNexus/NexusFileIO.h"
 
 #include <H5Cpp.h>
 #include <boost/shared_array.hpp>
 #include <boost/shared_ptr.hpp>
+
+#include <regex>
 
 using Mantid::Types::Core::DateAndTime;
 using std::map;
@@ -69,6 +72,18 @@ bool exists(::NeXus::File &file, const std::string &name) {
 bool exists(const std::map<std::string, std::string> &entries,
             const std::string &name) {
   return entries.find(name) != entries.end();
+}
+
+bool exists(const std::map<std::string, std::set<std::string>> &allEntries,
+            const std::string &name) {
+
+  for (auto it = allEntries.cbegin(); it != allEntries.cend(); ++it) {
+    const std::set<std::string> &entriesSet = it->second;
+    if (entriesSet.count(name) == 1) {
+      return true;
+    }
+  }
+  return false;
 }
 
 //----------------------------------------------------------------------------------------------
@@ -385,6 +400,10 @@ void LoadEventNexus::exec() {
   // Check to see if the monitors need to be loaded later
   bool load_monitors = this->getProperty("LoadMonitors");
 
+  // this calls the HDF5 interface directly to set a reusable data structure
+  // that carries all entries information (metadata) in
+  // std::map<std::string, std::set<std::string>> m_allEntries
+  setAllEntries();
   // this must make absolutely sure that m_file is a valid (and open)
   // NeXus::File object
   safeOpenFile(m_filename);
@@ -498,17 +517,19 @@ firstLastPulseTimes(::NeXus::File &file, Kernel::Logger &logger) {
  *
  * @return The number of events.
  */
-std::size_t numEvents(::NeXus::File &file, bool &hasTotalCounts,
-                      bool &oldNeXusFileNames) {
+std::size_t
+numEvents(::NeXus::File &file, bool &hasTotalCounts, bool &oldNeXusFileNames,
+          const std::string &prefix,
+          const std::map<std::string, std::set<std::string>> &allEntries) {
   // try getting the value of total_counts
   if (hasTotalCounts) {
     hasTotalCounts = false;
-    if (exists(file, "total_counts")) {
+    if (exists(allEntries, prefix + "/total_counts")) {
       try {
         file.openData("total_counts");
         auto info = file.getInfo();
         file.closeData();
-        if (info.type == NeXus::UINT64) {
+        if (info.type == ::NeXus::UINT64) {
           uint64_t eventCount;
           file.readData("total_counts", eventCount);
           hasTotalCounts = true;
@@ -558,7 +579,8 @@ template <typename T>
 boost::shared_ptr<BankPulseTimes> LoadEventNexus::runLoadNexusLogs(
     const std::string &nexusfilename, T localWorkspace, API::Algorithm &alg,
     bool returnpulsetimes, int &nPeriods,
-    std::unique_ptr<const TimeSeriesProperty<int>> &periodLog) {
+    std::unique_ptr<const TimeSeriesProperty<int>> &periodLog,
+    const std::map<std::string, std::set<std::string>> &allEntries) {
   // --------------------- Load DAS Logs -----------------
   // The pulse times will be empty if not specified in the DAS logs.
   // BankPulseTimes * out = NULL;
@@ -576,6 +598,10 @@ boost::shared_ptr<BankPulseTimes> LoadEventNexus::runLoadNexusLogs(
       loadLogs->setPropertyValue("NXentryName",
                                  alg.getPropertyValue("NXentryName"));
     } catch (...) {
+    }
+    // here share allEntries among "child" algorithms
+    if (!allEntries.empty()) {
+      loadLogs->setAllEntries_ptr(allEntries);
     }
 
     loadLogs->execute();
@@ -712,10 +738,12 @@ LoadEventNexus::runLoadNexusLogs<EventWorkspaceCollection_sptr>(
     const std::string &nexusfilename,
     EventWorkspaceCollection_sptr localWorkspace, API::Algorithm &alg,
     bool returnpulsetimes, int &nPeriods,
-    std::unique_ptr<const TimeSeriesProperty<int>> &periodLog) {
+    std::unique_ptr<const TimeSeriesProperty<int>> &periodLog,
+    const std::map<std::string, std::set<std::string>> &allEntries) {
   auto ws = localWorkspace->getSingleHeldWorkspace();
-  auto ret = runLoadNexusLogs<MatrixWorkspace_sptr>(
-      nexusfilename, ws, alg, returnpulsetimes, nPeriods, periodLog);
+  auto ret = runLoadNexusLogs<MatrixWorkspace_sptr>(nexusfilename, ws, alg,
+                                                    returnpulsetimes, nPeriods,
+                                                    periodLog, allEntries);
   return ret;
 }
 
@@ -751,7 +779,7 @@ void LoadEventNexus::loadEvents(API::Progress *const prog,
     prog->doReport("Loading DAS logs");
 
     m_allBanksPulseTimes = runLoadNexusLogs<EventWorkspaceCollection_sptr>(
-        m_filename, m_ws, *this, true, nPeriods, periodLog);
+        m_filename, m_ws, *this, true, nPeriods, periodLog, m_allEntries);
 
     try {
       run_start = m_ws->getFirstPulseTime();
@@ -782,8 +810,9 @@ void LoadEventNexus::loadEvents(API::Progress *const prog,
   try {
     // this is a static method that is why it is passing the
     // file object and the file path
-    loadEntryMetadata<EventWorkspaceCollection_sptr>(m_filename, m_ws,
-                                                     m_top_entry_name);
+    loadEntryMetadata<EventWorkspaceCollection_sptr>(
+        *m_file, m_ws, m_top_entry_name, m_allEntries);
+
   } catch (std::runtime_error &e) {
     // Missing metadata is not a fatal error. Log and go on with your life
     g_log.error() << "Error loading metadata: " << e.what() << '\n';
@@ -831,36 +860,45 @@ void LoadEventNexus::loadEvents(API::Progress *const prog,
   bool hasTotalCounts(true);
   bool haveWeights = false;
   auto firstPulseT = DateAndTime::maximum();
-  while (true) { // should be broken when entry name is set
-    const auto entry = m_file->getNextEntry();
-    const std::string entry_name(entry.first);
-    const std::string entry_class(entry.second);
-    if (entry_name == NULL_STR && entry_class == NULL_STR)
-      break;
 
-    if (entry_class == classType) {
-      // open the group
-      m_file->openGroup(entry_name, classType);
+  auto itClassEntries = m_allEntries.find(classType);
 
-      if (takeTimesFromEvents) {
-        /* If we are here, we are loading logs, but have failed to establish
-         * the run_start from the proton_charge log. We are going to get this
-         * from our event_time_zero instead
-         */
-        auto localFirstLast = firstLastPulseTimes(*m_file, this->g_log);
-        firstPulseT = std::min(firstPulseT, localFirstLast.first);
+  if (itClassEntries != m_allEntries.end()) {
+
+    const std::set<std::string> &classEntries = itClassEntries->second;
+    const std::regex classRegex("(/" + m_top_entry_name + "/)([^/]*)");
+    std::smatch groups;
+
+    for (const std::string &classEntry : classEntries) {
+
+      if (std::regex_match(classEntry, groups, classRegex)) {
+        const std::string entry_name(groups[2].str());
+        m_file->openGroup(entry_name, classType);
+
+        if (takeTimesFromEvents) {
+          /* If we are here, we are loading logs, but have failed to establish
+           * the run_start from the proton_charge log. We are going to get this
+           * from our event_time_zero instead
+           */
+          auto localFirstLast = firstLastPulseTimes(*m_file, this->g_log);
+          firstPulseT = std::min(firstPulseT, localFirstLast.first);
+        }
+        // get the number of events
+        const std::string prefix = "/" + m_top_entry_name + "/" + entry_name;
+        std::size_t num = numEvents(*m_file, hasTotalCounts, oldNeXusFileNames,
+                                    prefix, m_allEntries);
+        bankNames.emplace_back(entry_name);
+        bankNumEvents.emplace_back(num);
+
+        // Look for weights in simulated file
+        const std::string absoluteEventWeightName = prefix + "/event_weight";
+        haveWeights = exists(m_allEntries, absoluteEventWeightName);
+
+        m_file->closeGroup();
       }
-      // get the number of events
-      std::size_t num = numEvents(*m_file, hasTotalCounts, oldNeXusFileNames);
-      bankNames.emplace_back(entry_name);
-      bankNumEvents.emplace_back(num);
-
-      // Look for weights in simulated file
-      haveWeights = exists(*m_file, "event_weight");
-
-      m_file->closeGroup();
     }
   }
+
   if (takeTimesFromEvents)
     run_start = firstPulseT;
 
@@ -1095,7 +1133,8 @@ void LoadEventNexus::loadEvents(API::Progress *const prog,
     m_ws->setAllX(HistogramData::BinEdges{0.0, 1.0});
 
   // if there is time_of_flight load it
-  adjustTimeOfFlightISISLegacy(*m_file, m_ws, m_top_entry_name, classType);
+  adjustTimeOfFlightISISLegacy(*m_file, m_ws, m_top_entry_name, classType,
+                               m_allEntries);
 }
 
 //-----------------------------------------------------------------------------
@@ -1307,6 +1346,7 @@ bool LoadEventNexus::hasEventMonitors() {
   // Determine whether to load histograms or events
   try {
     m_file->openPath("/" + m_top_entry_name);
+    std::string prefix = "/" + m_top_entry_name;
     // Start with the base entry
     using string_map_t = std::map<std::string, std::string>;
     // Now we want to go through and find the monitors
@@ -1315,12 +1355,14 @@ bool LoadEventNexus::hasEventMonitors() {
          ++it) {
       if (it->second == "NXmonitor") {
         m_file->openGroup(it->first, it->second);
+        prefix += "/" + it->first;
         break;
       }
     }
     bool hasTotalCounts = false;
     bool oldNeXusFileNames = false;
-    result = numEvents(*m_file, hasTotalCounts, oldNeXusFileNames) > 0;
+    result = numEvents(*m_file, hasTotalCounts, oldNeXusFileNames, prefix,
+                       m_allEntries) > 0;
     m_file->closeGroup();
   } catch (::NeXus::Exception &) {
     result = false;
@@ -1551,6 +1593,11 @@ void LoadEventNexus::safeOpenFile(const std::string &fname) {
                              "file: " +
                              fname);
   }
+}
+
+void LoadEventNexus::setAllEntries() {
+  m_allEntries = Mantid::NeXus::getNexusAllEntries(m_filename);
+  setAllEntries_ptr(m_allEntries);
 }
 
 /// The parallel loader currently has no support for a series of special

@@ -293,6 +293,12 @@ public:
                              const double endProgress = -1.,
                              const bool enableLogging = true);
 
+  void setAllEntries_ptr(const std::map<std::string, std::set<std::string>>
+                             &allEntries) noexcept override;
+
+  const std::map<std::string, std::set<std::string>> *getAllEntries_ptr() const
+      noexcept override;
+
   /// set whether we wish to track the child algorithm's history and pass it the
   /// parent object to fill.
   void trackAlgorithmHistory(boost::shared_ptr<AlgorithmHistory> parentHist);
@@ -406,6 +412,10 @@ protected:
   /// distinguish between base processGroups() and overriden/algorithm specific
   /// versions
   bool m_usingBaseProcessGroups = false;
+
+  /// carries a pointer to a metadata structure storing entries, makes it
+  /// shareable among derived classes of Algorithm
+  const std::map<std::string, std::set<std::string>> *m_allEntries = nullptr;
 
   template <typename T, const int AllowedIndexTypes = IndexType::WorkspaceIndex,
             typename... WSPropArgs,
